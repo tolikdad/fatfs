@@ -7,13 +7,18 @@
 /* storage control modules to the FatFs module with a defined API.       */
 /*-----------------------------------------------------------------------*/
 
-#include "FatIOLayer.h"
+#include "diskio.h"
+#include "SerialFlashMemory.h"
+#include "MemoryManager.h"
 
 /* Definitions of physical drive number for each drive */
 #define DEV_RAM        0    /* Example: Map Ramdisk to physical drive 0 */
 #define DEV_MMC        1    /* Example: Map MMC/SD card to physical drive 1 */
 #define DEV_USB        2    /* Example: Map USB MSD to physical drive 2 */
 
+#define sectorSize 512
+#define spiFlashBlockSize 256
+#define amountOfBlocks 4096
 
 /*-----------------------------------------------------------------------*/
 /* Get Drive Status                                                      */
@@ -22,11 +27,11 @@
 DSTATUS disk_status (BYTE pdrv) {
     switch (pdrv) {
         case DEV_RAM :
-            return RAM_disk_status();
+            return RES_OK;
         case DEV_MMC :
-            return RAM_disk_status();
+            return RES_OK;
         case DEV_USB :
-            return RAM_disk_status();
+            return RES_OK;
     }
     return STA_NOINIT;
 }
@@ -38,11 +43,11 @@ DSTATUS disk_status (BYTE pdrv) {
 DSTATUS disk_initialize ( BYTE pdrv) {
     switch (pdrv) {
         case DEV_RAM :
-            return RAM_disk_initialize();
+            return RES_OK;
         case DEV_MMC :
-            return RAM_disk_initialize();
+            return RES_OK;
         case DEV_USB :
-            return RAM_disk_initialize();
+            return RES_OK;
     }
     return STA_NOINIT;
 }
@@ -57,15 +62,26 @@ DRESULT disk_read (
                    LBA_t sector,    /* Start sector in LBA */
                    UINT count        /* Number of sectors to read */
 ) {
-    switch (pdrv) {
-        case DEV_RAM :
-            return RAM_disk_read(buff, sector, count);
-        case DEV_MMC :
-            return RAM_disk_read(buff, sector, count);
-        case DEV_USB :
-            return RAM_disk_read(buff, sector, count);
+    DRESULT result = RES_OK;
+    UINT i;
+    SerialFlashMemory *serialFlashMemory = SerialFlashMemoryShared();
+    for(i = 0; i < count; i++) {
+        uint32_t offset = i * sectorSize;
+        uint32_t address = (sector + offset) * spiFlashBlockSize;
+        SerialFlashMemoryAddress firstAddress = SerialFlashMemoryAddressNew(address);
+        size_t count = serialFlashMemory->read(buff + offset, &firstAddress, spiFlashBlockSize);
+        if (count != spiFlashBlockSize) {
+            result = RES_ERROR;
+            break;
+        }
+        SerialFlashMemoryAddress secondAddress = SerialFlashMemoryAddressNew(address + spiFlashBlockSize);
+        count = serialFlashMemory->read(buff + offset + spiFlashBlockSize, &secondAddress, spiFlashBlockSize);
+        if (count != spiFlashBlockSize) {
+            result = RES_ERROR;
+            break;
+        }
     }
-    return RES_PARERR;
+    return result;
 }
 
 /*-----------------------------------------------------------------------*/
@@ -76,19 +92,33 @@ DRESULT disk_read (
 
 DRESULT disk_write (
                     BYTE pdrv,            /* Physical drive nmuber to identify the drive */
-                    const BYTE *buff,    /* Data to be written */
+                    const BYTE *buffeer,    /* Data to be written */
                     LBA_t sector,        /* Start sector in LBA */
                     UINT count            /* Number of sectors to write */
 ) {
-    switch (pdrv) {
-        case DEV_RAM :
-            return RAM_disk_write(buff, sector, count);
-        case DEV_MMC :
-            return RAM_disk_write(buff, sector, count);
-        case DEV_USB :
-            return RAM_disk_write(buff, sector, count);
+    DRESULT result = RES_OK;
+    UINT i;
+    unsigned char *buff = MemAlloc(sectorSize * count);
+    memcpy(buff, buffeer, sectorSize * count);
+    SerialFlashMemory *serialFlashMemory = SerialFlashMemoryShared();
+    for(i = 0; i < count; i++) {
+        uint32_t offset = i * sectorSize;
+        uint32_t address = (sector + offset) * spiFlashBlockSize;
+        SerialFlashMemoryAddress firstAddress = SerialFlashMemoryAddressNew(address);
+        DRESULT res = serialFlashMemory->write(buff + offset, &firstAddress, spiFlashBlockSize);
+        if (res != RES_OK) {
+            result = res;
+            break;
+        }
+        SerialFlashMemoryAddress secondAddress = SerialFlashMemoryAddressNew(address + spiFlashBlockSize);
+        res = serialFlashMemory->write( buff + offset + spiFlashBlockSize, &secondAddress, spiFlashBlockSize);
+        if (res != RES_OK) {
+            result = res;
+            break;
+        }
     }
-    return RES_PARERR;
+    FreeMem(buff, sectorSize * count);
+    return result;
 }
 
 #endif
@@ -102,13 +132,21 @@ DRESULT disk_ioctl (
                     BYTE cmd,        /* Control code */
                     void *buff        /* Buffer to send/receive control data */
 ) {
-    switch (pdrv) {
-        case DEV_RAM :
-            return RAM_disk_ioctl (cmd, buff);
-        case DEV_MMC :
-            return RAM_disk_ioctl (cmd, buff);
-        case DEV_USB :
-            return RAM_disk_ioctl (cmd, buff);
+    switch (cmd) {
+        case CTRL_SYNC:
+            return RES_OK;
+        case GET_SECTOR_COUNT: {
+            LBA_t *sectorCount = (LBA_t *) buff;
+            *sectorCount = (amountOfBlocks * spiFlashBlockSize) / sectorSize;
+            return RES_OK;
+        }
+        case GET_BLOCK_SIZE: {
+            LBA_t *blockSize = (LBA_t *) buff;
+            *blockSize = sectorSize;
+            return RES_OK;
+        }
+        default:
+            return RES_ERROR;
     }
     return RES_PARERR;
 }

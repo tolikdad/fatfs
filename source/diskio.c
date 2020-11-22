@@ -98,26 +98,26 @@ DRESULT disk_write (
 ) {
     DRESULT result = RES_OK;
     UINT i;
-    unsigned char *buff = MemAlloc(sectorSize * count);
-    memcpy(buff, buffeer, sectorSize * count);
+    unsigned char buff[256];
     SerialFlashMemory *serialFlashMemory = SerialFlashMemoryShared();
     for(i = 0; i < count; i++) {
         uint32_t offset = i * sectorSize;
         uint32_t address = (sector + offset) * spiFlashBlockSize;
         SerialFlashMemoryAddress firstAddress = SerialFlashMemoryAddressNew(address);
-        DRESULT res = serialFlashMemory->write(buff + offset, &firstAddress, spiFlashBlockSize);
+        memcpy(buff, buffeer + offset, 256);
+        DRESULT res = serialFlashMemory->write(buff, &firstAddress, spiFlashBlockSize);
         if (res != RES_OK) {
             result = res;
             break;
         }
+        memcpy(buff, buffeer + offset + spiFlashBlockSize, 256);
         SerialFlashMemoryAddress secondAddress = SerialFlashMemoryAddressNew(address + spiFlashBlockSize);
-        res = serialFlashMemory->write( buff + offset + spiFlashBlockSize, &secondAddress, spiFlashBlockSize);
+        res = serialFlashMemory->write( buff, &secondAddress, spiFlashBlockSize);
         if (res != RES_OK) {
             result = res;
             break;
         }
     }
-    FreeMem(buff, sectorSize * count);
     return result;
 }
 

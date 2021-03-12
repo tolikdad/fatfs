@@ -18,7 +18,7 @@
 
 #define sectorSize 512
 #define spiFlashBlockSize 256
-#define amountOfBlocks 4096
+#define amountOfBlocks 3072
 
 /*-----------------------------------------------------------------------*/
 /* Get Drive Status                                                      */
